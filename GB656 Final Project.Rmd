@@ -1,0 +1,284 @@
+---
+title: "ML Final Project"
+author: "Sandra"
+date: "12/18/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+library(psych)
+library(MASS)
+library(pROC)
+library(rpart)
+library(randomForest)
+library(nnet)
+library(e1071)
+library(gam)
+```
+
+```{r}
+# Data Preparation
+labels = read.csv("training_set_labels.csv", header = TRUE)
+df = read.csv("training_set_features.csv", header = TRUE)
+data = merge(df, labels, by = "respondent_id")
+data = data[,-c(12,20:22,28:29,31:32,35:36,38)]
+head(data,5)
+
+```
+
+```{r}
+describe(data)
+# describe(test)
+```
+```{r}
+# Split data into train and test dataset
+set.seed(100)
+trn <- runif(nrow(data)) < 0.7
+train <- data[trn == TRUE,]
+test <- data[trn == FALSE,]
+train <- train[complete.cases(train), -c(1)]
+test <- test[complete.cases(test), -c(1)]
+```
+
+```{r}
+# Confusion Matrix 
+TPR <- function(y,yhat)  { sum(y==1 & yhat==1) / sum(y==1) }
+TNR <- function(y,yhat)  { sum(y==0 & yhat==0) / sum(y==0) }
+ME <- function(y, yhat)  { (sum(y==1 & yhat==0)+sum(y==0 & yhat==1))/sum(y==1|y==0)}
+```
+
+
+*********************************
+** PART I -- LINEAR REGRESSION **
+*********************************
+R-square:
+The larger R-squared, the better the regression model fits your data. 
+The R^2 for improved model m1 and original ols_full are similar to 0.33.
+The low R^2 presents the model cannot fit the sample data well.
+
+AIC:
+The lower the value for AIC, the better the fit of the model. The absolute value of the AIC value is not important. It can be positive or negative.
+When applying OLS regression, AIC is around -26848, which means it is quite nice to fit the model by using "backward selection" method.
+
+
+```{r}
+# OLS regression
+ols_full <- lm(h1n1_vaccine ~ ., data = train)
+summary(ols_full)
+summary(ols_full)$adj.r.squared
+
+# Enhance the model
+m1 <- lm(h1n1_vaccine ~ h1n1_knowledge+doctor_recc_h1n1+child_under_6_months+
+           health_worker+health_insurance+opinion_h1n1_vacc_effective+
+           opinion_h1n1_risk+age_group+race+sex, data = train)
+summary(m1)
+summary(m1)$adj.r.squared
+
+# Predictions
+yhat.ols <- predict(m1, newdata = test)
+table(test$h1n1_vaccine, (yhat.ols > 0.5))
+TPR(test$h1n1_vaccine, (yhat.ols > 0.5))
+TNR(test$h1n1_vaccine, (yhat.ols > 0.5))
+ME(test$h1n1_vaccine, (yhat.ols > 0.5))
+```
+
+
+```{r}
+# Rely on "Backward Selection" to obtain a model
+ols_real_full <- lm(h1n1_vaccine ~., data = train)
+step(ols_real_full, direction="backward")
+```
+
+*********************************
+** PART II -- LOGISTIC REGRESSION **
+*********************************
+Logistic regression is used for modeling categorical outcomes, particularly no/yes, 0/1 outcomes.Such problems are called (binary) classification problems.
+Under the consideration of dependent variable “h1n1_vaccine”, we decide to use logistic regression with binary classification. 
+
+```{r}
+# Apply glm() -- logistic regression model
+glm <- glm(h1n1_vaccine ~.,family = "binomial", data = train)
+summary(glm)
+yhat_glm <- predict(glm, type="response")
+
+# confusion matrix
+table(train$h1n1_vaccine, (yhat_glm>0.5))
+TPR(train$h1n1_vaccine,(yhat_glm>0.5))
+TNR(train$h1n1_vaccine,(yhat_glm>0.5))
+ME(train$h1n1_vaccine,(yhat_glm>0.5))
+
+yhat.glm <- predict(glm, test, type="response")
+table(test$h1n1_vaccine, (yhat.glm > 0.5))
+TPR(test$h1n1_vaccine, (yhat.glm > 0.5))
+TNR(test$h1n1_vaccine, (yhat.glm > 0.5))
+
+# Misclassification Error
+ME(test$h1n1_vaccine, (yhat.glm > 0.5))
+```
+
+
+```{r}
+# LDA/QDA
+lda <- lda(h1n1_vaccine ~ ., data=train)
+yhat_lda <- predict(lda)$posterior[,2]
+table(train$h1n1_vaccine, (yhat_lda >0.5))
+yhat.lda <- predict(lda, test)$posterior[,2]
+table(test$h1n1_vaccine, (yhat.lda > 0.5))
+TPR(test$h1n1_vaccine, (yhat.lda >0.5))
+TNR(test$h1n1_vaccine, (yhat.lda >0.5))
+ME(test$h1n1_vaccine, (yhat.lda >0.5))
+
+qda <- qda(h1n1_vaccine ~ ., data=train)
+yhat_qda <- predict(qda)$posterior[,2]
+table(train$h1n1_vaccine, (yhat_qda >0.5))
+yhat.qda <- predict(qda, test)$posterior[,2]
+table(test$h1n1_vaccine, (yhat.qda > 0.5))
+TPR(test$h1n1_vaccine, (yhat.qda >0.5))
+TNR(test$h1n1_vaccine, (yhat.qda >0.5))
+ME(test$h1n1_vaccine, (yhat.qda >0.5))
+```
+
+
+```{r}
+# Plot ROC graph
+par(mfrow=c(1,1))
+glm.roc <- roc(test$h1n1_vaccine, yhat.glm, direction = "<")
+glm.roc
+lda.roc <- roc(test$h1n1_vaccine, yhat.lda, direction = "<")
+lda.roc
+qda.roc <- roc(test$h1n1_vaccine, yhat.qda, direction = "<")
+qda.roc
+plot(glm.roc, lwd=3)
+lines(lda.roc, lwd=3, col = "yellow")
+lines(qda.roc, lwd=3, col = "blue")
+legend("bottomright",title="ROC Curves",c("glm","lda","qda"), fill=c("black","yellow","blue"))
+```
+
+*********************************
+** PART III -- Classification Tree **
+*********************************
+```{r}
+paste(colnames(train[,-c(1)]), collapse = "+")
+form1 <- formula(h1n1_vaccine ~ h1n1_concern+h1n1_knowledge+behavioral_antiviral_meds+behavioral_avoidance+behavioral_face_mask+behavioral_wash_hands+behavioral_large_gatherings+behavioral_outside_home+behavioral_touch_face+doctor_recc_h1n1+chronic_med_condition+child_under_6_months+health_worker+health_insurance+opinion_h1n1_vacc_effective+opinion_h1n1_risk+opinion_h1n1_sick_from_vacc+age_group+education+race+sex+income_poverty+employment_status+household_adults+household_children)
+
+t1 <- rpart(form1, data=train, cp=.001, method="class")
+plot(t1,uniform=T,compress=T,margin=.05,branch=0.9)
+text(t1, cex=.4, col="navy",use.n=TRUE)
+
+plotcp(t1) #plot cross-validation results
+CP <- printcp(t1) #display cp table
+
+cp <- CP[,1][CP[,4] == min(CP[,4])]
+cp
+
+t2 <- prune(t1,cp=cp[1])
+plot(t2,uniform=T,compress=T,margin=.05,branch=0.3)
+text(t2, cex=.7, col="navy",use.n=TRUE)
+
+# Predictions
+yhat.t2 <- predict(t2, test, type="prob")[,2]
+table(test$h1n1_vaccine, (yhat.t2>0.5))
+TPR(test$h1n1_vaccine,(yhat.t2>0.5))
+TNR(test$h1n1_vaccine,(yhat.t2>0.5))
+ME(test$h1n1_vaccine,(yhat.t2>0.5))
+tree.roc <- roc(test$h1n1_vaccine, yhat.t2 , direction="<")
+tree.roc
+```
+
+
+*********************************
+** PART IV -- Random Forest **
+*********************************
+```{r}
+train_rf <- train[,-c(18:23)]
+X <- as.matrix(train_rf[,-c(20)])
+Y <- factor(train_rf$h1n1_vaccine)
+rf1 <- randomForest(x=X, y=Y, data=train_rf, ntree=500, mtry=3, importance=T, na.action=na.omit)
+summary(rf1)
+
+head(rf1$importance)
+
+# variable importance ranking 1
+varImpPlot(rf1, sort = TRUE , main = "Random Forest Importance Plot")
+
+# variable importance ranking 2
+imp <- rf1$importance[,4]
+ord <- order(imp, decreasing=T)
+imp <- imp[ord]
+
+par(mar=c(2, 8, 4, 2) + 0.1)
+barplot(imp, col='lavender', horiz=TRUE, las=1, cex.names=.8)
+title("Random Forest Variable Importance Plot")
+
+# Predictions
+yhat.rf <- predict(rf1, test, type="prob")[,2]
+table(test$h1n1_vaccine, (yhat.rf>0.5))
+TPR(test$h1n1_vaccine,(yhat.rf>0.5))
+TNR(test$h1n1_vaccine,(yhat.rf>0.5))
+ME(test$h1n1_vaccine,(yhat.rf>0.5))
+
+# Plot ROC graph
+par(mfrow=c(1,1))
+rf.roc <- roc(test$h1n1_vaccine, yhat.rf, direction="<")
+rf.roc
+plot(rf.roc, lwd=3, col = "green")
+lines(tree.roc, lwd=3, col = "red")
+lines(glm.roc, lwd=3)
+legend("bottomright",title="ROC Curves",c("rf","tree","glm"), fill=c("green","red","black"))
+```
+
+*********************************
+** PART V -- Neural Nets **
+*********************************
+```{r}
+data_nn <- data[,-c(1,19:24)]
+data_nn[,-c(20)] <- scale(data_nn[,-c(20)])
+data_nn$h1n1_vaccine <- factor(data_nn$h1n1_vaccine)
+train2 <- data_nn[trn==TRUE,]
+test2 <- data_nn[trn==FALSE,]
+
+paste(colnames(data_nn), collapse = "+")
+form2 <- h1n1_vaccine ~ h1n1_concern+h1n1_knowledge+behavioral_antiviral_meds+behavioral_avoidance+behavioral_face_mask+behavioral_wash_hands+behavioral_large_gatherings+behavioral_outside_home+behavioral_touch_face+doctor_recc_h1n1+chronic_med_condition+child_under_6_months+health_worker+health_insurance+opinion_h1n1_vacc_effective+opinion_h1n1_risk+opinion_h1n1_sick_from_vacc+household_adults+household_children
+
+n1 <- nnet(form2, data = train2, size = 7, maxit = 500, decay=0.002)
+
+# Predictions
+yhat.n1 <- predict(n1, test)
+table(test$h1n1_vaccine, (yhat.n1>0.5))
+TPR(test$h1n1_vaccine,(yhat.n1>0.5))
+TNR(test$h1n1_vaccine,(yhat.n1>0.5))
+ME(test$h1n1_vaccine,(yhat.n1>0.5))
+
+# Plot ROC graph
+par(mfrow=c(1,1))
+nn.roc <- roc(test$h1n1_vaccine, yhat.n1, direction="<")
+nn.roc
+plot(nn.roc, lwd=3, col = "purple")
+lines(rf.roc, lwd=3, col = "green")
+lines(glm.roc, lwd=3)
+legend("bottomright",title="ROC Curves",c("nnet","rf","glm"), fill=c("purple","green","black"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
